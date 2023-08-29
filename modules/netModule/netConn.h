@@ -16,12 +16,6 @@ namespace module {
 namespace net {
 
 
-// 设计思路：
-// NetConn作为网络管理总类，里面管理list<NetConnItem>
-// 每个NetConnItem各自包含一个Setting、一个list<abstractsocket>、一个tcpserver
-// 如果是Setting.type为tcp/udpsocket，则只使用list<>[0]
-
-
 // 网络连接管理
 class NetConn : public QObject {
     Q_OBJECT
@@ -59,6 +53,8 @@ public slots:
 
     // 设置时间戳启用状态
     void setTimeStampEnableState(bool state);
+    // 设置接收启用状态
+    void setReceiveEnabledState(bool state);
 
     // 发送消息
     bool sendMessage(QString message);
@@ -67,11 +63,9 @@ public slots:
     void resetCount();
     // 设置计数启用状态
     void setCountEnabledState(bool state);
-    // 设置接收启用状态
-    void setReceiveEnabledState(bool state);
 
-    // 主动断开连接，当连接被动断开时，也应该调用该函数来达到清除缓存的作用
-    void disconnectToClient(QString address, QString port);
+    // 主动断开连接
+    void disconnectToClient(QString address, quint16 port);
 
 
 signals:
@@ -95,6 +89,8 @@ private:
     // 设置
     NetConnItemSettings _settings;
 
+    ConnState _state = ConnState::Disconnected;
+
     // 计数
     uint64_t _recvBytesCount;
     uint64_t _sendBytesCount;
@@ -104,18 +100,17 @@ private:
     // 设置状态并发出信号
     void setState(const ConnState state);
 
+    // 从列表中清除指定socket，当连接被动断开时，也应该调用该函数
+    inline void removeSocket(const QString& address, quint16 port);
 private slots:
     // 当套接字连接成功时，调用此函数
-    void onSocketConnected(QTcpSocket* tempTcpSocketUser);
-
+    void onSocketConnected(QTcpSocket* socket);
     // 当套接字断开连接时，调用此函数
-    void onSocketDisconnected(QTcpSocket* tempTcpSocketUser);
-
-
+    void onSocketDisconnected(QTcpSocket* socket);
     // 当套接字有可读数据时，调用此函数
-    void onSocketReadyRead(QTcpSocket* tempTcpSocketUser);
+    void onSocketReadyRead(QTcpSocket* socket);
     // 当套接字发生错误时，调用此函数
-    void onSocketError(QAbstractSocket::SocketError error, QTcpSocket* tempTcpSocketUser);
+    void onSocketError(QAbstractSocket::SocketError error, QTcpSocket* socket);
     // tcp_server模式下有新客户端连接槽函数
     void onTCPServerNewConnectd();
 };

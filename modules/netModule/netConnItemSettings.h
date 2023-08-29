@@ -43,7 +43,6 @@ public:
 
     // 基本设置
     ConnType type = ConnType::TcpClient;
-    ConnState state = ConnState::Disconnected;
     QHostAddress serverAddress = QHostAddress("127.0.0.1");
     int port = 5678;
 

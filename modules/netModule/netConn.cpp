@@ -75,14 +75,17 @@ void NetConn::setServerPort(QString port) {
 }
 
 void NetConn::run() {
+    qDebug() << "run" << _state;
+
     // 如果是未连接则开始连接或监听，否则将跳过
-    if (_settings.state == ConnState::Disconnected) {
+    if (_state == ConnState::Disconnected) {
         setState(ConnState::Connecting);
 
         // 根据不同类型分别启动，不写switch是因为会出现jump passby跳过初始化报错
         if (_settings.type == ConnType::TcpClient) {
             // 初始化
-            QSharedPointer<QTcpSocket> socket = QSharedPointer<QTcpSocket>(new QTcpSocket());
+            QSharedPointer<QTcpSocket> socket =
+                QSharedPointer<QTcpSocket>(new QTcpSocket(), &QTcpSocket::deleteLater);
             _socketList.append(socket);
             // 绑定信号
             connect(socket.data(),
@@ -108,12 +111,16 @@ void NetConn::run() {
 
         } else if (_settings.type == ConnType::TcpServer) {
             // 初始化
-            _tcpServer = QSharedPointer<QTcpServer>(new QTcpServer(this));
+            _tcpServer = QSharedPointer<QTcpServer>(new QTcpServer(this), &QTcpServer::deleteLater);
             // 绑定信号
             connect(_tcpServer.data(),
                     &QTcpServer::newConnection,
                     this,
                     &NetConn::onTCPServerNewConnectd);
+            //            connect(_tcpServer.data(),
+            //                    &QTcpServer::acceptError,
+            //                    this,
+            //                    &NetConn::onTCPServerAcceptError);
 
             // 开始监听，server可以直接判断listen是否成功，client socket就要在错误响应里判断
             if (!_tcpServer->listen(QHostAddress(_settings.serverAddress), _settings.port)) {
@@ -134,29 +141,26 @@ void NetConn::run() {
 }
 
 void NetConn::stop() {
-    if (_settings.state == ConnState::Connected) {
+    qDebug() << "stop" << _state;
+    if (_state == ConnState::Connected) {
         // 根据不同类型分别停止
-        switch (_settings.type) {
-            case ConnType::TcpClient:
-                // 默认非server模式下，用且仅用列表里的第0个socket
-                _socketList.at(0)->disconnectFromHost();
-                break;
-
-            case ConnType::TcpServer:
-                _tcpServer->disconnect();
-                _tcpServer->close();
-                _socketList.clear();
-                setState(ConnState::Disconnected);
-                break;
-
-            default:
-                break;
+        if (_settings.type == ConnType::TcpClient) {
+            // 默认非server模式下，用且仅用列表里的第0个socket
+            auto socket = _socketList.at(0);
+            socket->disconnectFromHost();
+        } else if (_settings.type == ConnType::TcpServer) {
+            // server需要手动调用函数关闭连接，并手动释放
+            _tcpServer->disconnect();
+            _tcpServer->close();
+            _socketList.clear();
+            setState(ConnState::Disconnected);
+        } else {
         }
     }
 }
 
 void NetConn::connectBtnClicked() {
-    if (_settings.state != ConnState::Disconnected) {
+    if (_state != ConnState::Disconnected) {
         stop();
     } else {
         run();
@@ -168,7 +172,7 @@ void NetConn::setTimeStampEnableState(bool state) {
 }
 
 bool NetConn::sendMessage(QString message) {
-    if (_settings.state == ConnState::Connected) {
+    if (_state == ConnState::Connected) {
         try {
             socketGroupSendMsg(message);
             return true;
@@ -194,43 +198,51 @@ void NetConn::setReceiveEnabledState(bool state) {
     _settings.receiveEnabled = state;
 }
 
-void NetConn::disconnectToClient(QString address, QString port) {
-    qDebug() << "in onDisconnectToClients";
-
-    _socketList.removeIf([address, port](const QSharedPointer<QTcpSocket>& socket) {
-        return socket->peerAddress().toString() == address && socket->peerPort() == port;
-    });
+void NetConn::disconnectToClient(QString address, quint16 port) {
+    qCritical() << "disconnectToClient "
+                << "ip:" << address << "port: " << port;
+    removeSocket(address, port);
 }
 
 void NetConn::setState(const ConnState state) {
-    if (_settings.state != state) {
-        _settings.state = state;
+    if (_state != state) {
+        _state = state;
         emit stateChanged(state);
     }
 }
 
+inline void NetConn::removeSocket(const QString& address, quint16 port) {
+    _socketList.removeIf([address, port](const QSharedPointer<QTcpSocket>& socket) {
+        return socket->peerAddress().toString() == address && socket->peerPort() == port;
+    });
 
-void NetConn::onSocketConnected(QTcpSocket* tempTcpSocketUser) {
-    qDebug() << "Connected "
-             << "ip:" << tempTcpSocketUser->peerAddress()
-             << "port: " << tempTcpSocketUser->peerPort();
+    qDebug() << "Removesocket "
+             << "ip:" << address << "port: " << port;
+}
+
+void NetConn::onSocketConnected(QTcpSocket* socket) {
+    qCritical() << "Connected "
+                << "ip:" << socket->peerAddress() << "port: " << socket->peerPort();
     setState(ConnState::Connected);
 }
 
-void NetConn::onSocketDisconnected(QTcpSocket* tempTcpSocketUser) {
-    qDebug() << "Disconnected "
-             << "ip:" << tempTcpSocketUser->peerAddress()
-             << "port: " << tempTcpSocketUser->peerPort();
+void NetConn::onSocketDisconnected(QTcpSocket* socket) {
+    qCritical() << "Disconnected "
+                << "ip:" << socket->peerAddress() << "port: " << socket->peerPort();
+    //    socket->abort();
+    removeSocket(socket->peerAddress().toString(), socket->peerPort());
 
-    // 在
-
-    setState(ConnState::Disconnected);
+    // 如果不是server模式（其他模式只能有一个socket），那么就认为连接全部关闭，server模式需要自己手动关闭
+    if (_settings.type != ConnType::TcpServer) {
+        //        removeSocket(socket->peerAddress().toString(), socket->peerPort());
+        setState(ConnState::Disconnected);
+    }
 }
 
 
-void NetConn::onSocketReadyRead(QTcpSocket* tempTcpSocketUser) {
+void NetConn::onSocketReadyRead(QTcpSocket* socket) {
     if (_settings.receiveEnabled) {
-        QByteArray data = tempTcpSocketUser->readAll();
+        QByteArray data = socket->readAll();
         QString message = QString::fromLocal8Bit(data);
         qDebug() << "recv: " << message;
 
@@ -256,11 +268,18 @@ void NetConn::onSocketReadyRead(QTcpSocket* tempTcpSocketUser) {
     }
 }
 
-void NetConn::onSocketError(QAbstractSocket::SocketError error, QTcpSocket* tempTcpSocketUser) {
-    qDebug() << "Socket error:" << error << "ip:" << tempTcpSocketUser->peerAddress()
-             << "port: " << tempTcpSocketUser->peerPort();
-    setState(ConnState::Disconnected);
+void NetConn::onSocketError(QAbstractSocket::SocketError error, QTcpSocket* socket) {
+    qCritical() << "Socket error:" << error << "ip:" << socket->peerAddress()
+                << "port: " << socket->peerPort();
 
+    // 对于client导致的拒绝连接，需要手动调用disconnect，暂时没有重连机制
+    if (_settings.type == ConnType::TcpClient
+        && error == QAbstractSocket::SocketError::ConnectionRefusedError) {
+        socket->disconnect();
+        onSocketDisconnected(socket);
+    }
+
+    // 传出错误消息
     QString message = "error:";
     QMetaEnum metaEnum = QMetaEnum::fromType<QAbstractSocket::SocketError>();
     message += QString(metaEnum.valueToKey(error));
@@ -271,7 +290,9 @@ void NetConn::onSocketError(QAbstractSocket::SocketError error, QTcpSocket* temp
 void NetConn::onTCPServerNewConnectd() {
     // 当前连接来的客户端
     auto nextSocket = _tcpServer->nextPendingConnection();
-    QSharedPointer<QTcpSocket> socket = QSharedPointer<QTcpSocket>(nextSocket);
+    // 转为智能指针后存入socket列表，注意一定要传入删除器，否则断开连接处理会有问题
+    QSharedPointer<QTcpSocket> socket =
+        QSharedPointer<QTcpSocket>(nextSocket, &QTcpSocket::deleteLater);
     _socketList.append(socket);
 
     // 添加信号槽
@@ -283,7 +304,6 @@ void NetConn::onTCPServerNewConnectd() {
             &QAbstractSocket::disconnected,
             this,
             std::bind(&NetConn::onSocketDisconnected, this, socket.data()));
-
     connect(socket.data(),
             &QAbstractSocket::readyRead,
             this,

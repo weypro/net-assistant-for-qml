@@ -34,7 +34,7 @@ Column {
 
         Image {
             x: 8
-            source: "/images/arrow-right.svg"
+            source: "../images/arrow-right.svg"
             anchors.verticalCenter: parent.verticalCenter
             height: parent.height
             width: 20

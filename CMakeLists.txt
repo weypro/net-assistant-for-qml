@@ -4,7 +4,6 @@ project(netassistant VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 6.4 REQUIRED COMPONENTS Quick)
 
@@ -31,14 +30,10 @@ qt_add_qml_module(appnetassistant
     "qml/SettingsView/SettingsComponentText.qml"
     "qml/SettingsView/SettingsComponentContainer.qml"
     RESOURCES
-    "qml/images/arrow.png"
-    qml.qrc
+    "qml/images/arrow-right.svg"
     SOURCES modules/netModule/netConn.h
     SOURCES modules/netModule/netConn.cpp
-
-
     SOURCES modules/netModule/netConnItemSettings.h
-    SOURCES modules/netModule/netConnItem.h modules/netModule/netConnItem.cpp
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
