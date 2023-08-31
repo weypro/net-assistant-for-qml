@@ -9,6 +9,9 @@
 #include <QStringListModel>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <future>
+#include <mutex>
+#include <thread>
 
 #include "netConnItemSettings.h"
 
@@ -44,7 +47,7 @@ public slots:
     void setServerAddress(QString address);
     // 设置端口号
     void setServerPort(QString port);
-    // 开始运行（连接服务器或监听客户端）
+    // 开始运行（作为client或server）
     void run();
     // 停止运行
     void stop();
@@ -77,18 +80,21 @@ signals:
     void statisticsChanged(const QString& recvCountStr, const QString& sendCountStr);
     // 错误信号
     void errorOccurred(const QString& message);
-
+    // 重连成功
+    void reconnectSucceeded();
 
 private:
     // tcp server，用组合的方式为每个连接item都提供了server和client的能力，方便直接使用
     QSharedPointer<QTcpServer> _tcpServer;
-    // 用于存放多个客户端
+    // 用来管理已建立的socket
     // 默认非server模式下，用且仅用列表里的第0个socket
     QList<QSharedPointer<QTcpSocket>> _socketList;
+    std::mutex _socketListMutex;
+
 
     // 设置
     NetConnItemSettings _settings;
-
+    // 连接状态
     ConnState _state = ConnState::Disconnected;
 
     // 计数
@@ -97,22 +103,34 @@ private:
     // 计数启用
     bool _countEnabled;
 
+    // 重连取消/完成信号，现在只有client一个socket需要重连，不需要线程池
+    std::future<void> _reconnectFinalResult;
+    std::atomic<bool> _reconnectCancel;
+
     // 设置状态并发出信号
     void setState(const ConnState state);
 
+    // 创建绑定信号后的socket
+    QSharedPointer<QTcpSocket> createSocketWithSignal(QTcpSocket* rawSocketPtr);
     // 从列表中清除指定socket，当连接被动断开时，也应该调用该函数
     inline void removeSocket(const QString& address, quint16 port);
+    // 重新连接
+    inline void reconnectSocket(const QString& address, quint16 port);
+    // 取消重连
+    void cancelReconnect();
 private slots:
-    // 当套接字连接成功时，调用此函数
-    void onSocketConnected(QTcpSocket* socket);
-    // 当套接字断开连接时，调用此函数
+    // 套接字连接成功时
+    void onSocketConnected(QSharedPointer<QTcpSocket> socket);
+    // 套接字断开连接时
     void onSocketDisconnected(QTcpSocket* socket);
-    // 当套接字有可读数据时，调用此函数
+    // 套接字有可读数据时
     void onSocketReadyRead(QTcpSocket* socket);
-    // 当套接字发生错误时，调用此函数
+    // 套接字发生错误时
     void onSocketError(QAbstractSocket::SocketError error, QTcpSocket* socket);
-    // tcp_server模式下有新客户端连接槽函数
+    // tcp_server模式下有新客户端连接时
     void onTCPServerNewConnectd();
+    // 重连成功时
+    void onReconnectSucceeded();
 };
 }    // namespace net
 }    // namespace module

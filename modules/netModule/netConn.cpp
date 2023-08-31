@@ -77,6 +77,9 @@ void NetConn::setServerPort(QString port) {
 void NetConn::run() {
     qDebug() << "run" << _state;
 
+    // 取消重连任务
+    cancelReconnect();
+
     // 如果是未连接则开始连接或监听，否则将跳过
     if (_state == ConnState::Disconnected) {
         setState(ConnState::Connecting);
@@ -84,30 +87,18 @@ void NetConn::run() {
         // 根据不同类型分别启动，不写switch是因为会出现jump passby跳过初始化报错
         if (_settings.type == ConnType::TcpClient) {
             // 初始化
-            QSharedPointer<QTcpSocket> socket =
-                QSharedPointer<QTcpSocket>(new QTcpSocket(), &QTcpSocket::deleteLater);
-            _socketList.append(socket);
-            // 绑定信号
-            connect(socket.data(),
-                    &QAbstractSocket::connected,
-                    this,
-                    std::bind(&NetConn::onSocketConnected, this, socket.data()));
-            connect(socket.data(),
-                    &QAbstractSocket::disconnected,
-                    this,
-                    std::bind(&NetConn::onSocketDisconnected, this, socket.data()));
-
-            connect(socket.data(),
-                    &QAbstractSocket::readyRead,
-                    this,
-                    std::bind(&NetConn::onSocketReadyRead, this, socket.data()));
-            connect(socket.data(),
-                    &QAbstractSocket::errorOccurred,
-                    this,
-                    std::bind(&NetConn::onSocketError, this, std::placeholders::_1, socket.data()));
-
+            QSharedPointer<QTcpSocket> socket = createSocketWithSignal(new QTcpSocket());
+            //            {
+            //                std::lock_guard lock(_socketListMutex);
+            //                _socketList.append(socket);
+            //            }
+            setState(ConnState::Connecting);
             // 开始连接，连接状态会在槽函数中改变
             socket->connectToHost(_settings.serverAddress, _settings.port);
+            if (!socket->waitForConnected(_settings.fistWaitingTime)) {
+                qCritical() << "cannot connect";
+                setState(ConnState::Disconnected);
+            }
 
         } else if (_settings.type == ConnType::TcpServer) {
             // 初始化
@@ -117,11 +108,6 @@ void NetConn::run() {
                     &QTcpServer::newConnection,
                     this,
                     &NetConn::onTCPServerNewConnectd);
-            //            connect(_tcpServer.data(),
-            //                    &QTcpServer::acceptError,
-            //                    this,
-            //                    &NetConn::onTCPServerAcceptError);
-
             // 开始监听，server可以直接判断listen是否成功，client socket就要在错误响应里判断
             if (!_tcpServer->listen(QHostAddress(_settings.serverAddress), _settings.port)) {
                 qDebug() << "server err" << _tcpServer->errorString();
@@ -152,7 +138,11 @@ void NetConn::stop() {
             // server需要手动调用函数关闭连接，并手动释放
             _tcpServer->disconnect();
             _tcpServer->close();
-            _socketList.clear();
+            {
+                std::lock_guard lock(_socketListMutex);
+
+                _socketList.clear();
+            }
             setState(ConnState::Disconnected);
         } else {
         }
@@ -211,30 +201,170 @@ void NetConn::setState(const ConnState state) {
     }
 }
 
+QSharedPointer<QTcpSocket> NetConn::createSocketWithSignal(QTcpSocket* rawSocketPtr) {
+    QSharedPointer<QTcpSocket> socket =
+        QSharedPointer<QTcpSocket>(rawSocketPtr, &QTcpSocket::deleteLater);
+    // 绑定信号
+    connect(socket.data(),
+            &QAbstractSocket::connected,
+            this,
+            std::bind(&NetConn::onSocketConnected, this, socket));
+    connect(socket.data(),
+            &QAbstractSocket::disconnected,
+            this,
+            std::bind(&NetConn::onSocketDisconnected, this, socket.data()));
+    connect(socket.data(),
+            &QAbstractSocket::readyRead,
+            this,
+            std::bind(&NetConn::onSocketReadyRead, this, socket.data()));
+    connect(socket.data(),
+            &QAbstractSocket::errorOccurred,
+            this,
+            std::bind(&NetConn::onSocketError, this, std::placeholders::_1, socket.data()));
+
+    return socket;
+}
+
 inline void NetConn::removeSocket(const QString& address, quint16 port) {
-    _socketList.removeIf([address, port](const QSharedPointer<QTcpSocket>& socket) {
-        return socket->peerAddress().toString() == address && socket->peerPort() == port;
-    });
+    {
+        std::lock_guard lock(_socketListMutex);
+
+        _socketList.removeIf([address, port](const QSharedPointer<QTcpSocket>& socket) {
+            return socket->peerAddress().toString() == address && socket->peerPort() == port;
+        });
+        qDebug() << "Current socketlist length after removing: " << _socketList.length();
+    }
 
     qDebug() << "Removesocket "
              << "ip:" << address << "port: " << port;
 }
 
-void NetConn::onSocketConnected(QTcpSocket* socket) {
-    qCritical() << "Connected "
-                << "ip:" << socket->peerAddress() << "port: " << socket->peerPort();
+void NetConn::reconnectSocket(const QString& address, quint16 port) {
+    // 用于从重连线程内传递取消/执行完成信号给主线程
+    std::promise<void> outerPromise;
+    _reconnectFinalResult = outerPromise.get_future();
+    // 执行重连任务线程
+    std::thread t([this,
+                   address,
+                   port,
+                   _socketList = _socketList,
+                   maxTimes = _settings.reconnectMaxTimes,
+                   waitingTime = _settings.reconnectWaitingTime,
+                   promise = std::move(outerPromise)]() mutable {
+        // 尝试重连的次数
+        int retry = 0;
+        // 创建一个临时的socket对象，用于尝试连接
+        auto socket = new QTcpSocket();
+
+        // 循环重连，直到成功或达到最大次数或收到取消信号
+        while (true) {
+            qInfo() << "retrying tims: " << retry;
+            // 连接到指定的地址和端口
+            socket->connectToHost(address, port);
+            // 等待连接结果，超时时间为5秒
+            bool connected = socket->waitForConnected(waitingTime);
+            // 如果连接成功，退出循环
+            if (connected) {
+                break;
+            }
+            // 是否达到最大次数
+            retry++;
+            if (retry >= maxTimes) {
+                break;
+            }
+            // 是否收到取消信号
+            if (_reconnectCancel) {
+                break;
+            }
+        }
+        // 如果取消了但也重连成功了，那就不管，因为之前已经在绑定好的connected事件中添加到列表里了
+        //        // 如果连接成功，将临时的socket对象转为智能指针，并加入到socketList中
+        //        if (socket->state() == QAbstractSocket::ConnectedState) {
+        //            {
+        //                std::lock_guard lock(_socketListMutex);
+        //                _socketList.append(socket);
+        //            }
+
+        //            // 添加信号槽
+        //            connect(socket.data(),
+        //                    &QAbstractSocket::connected,
+        //                    this,
+        //                    std::bind(&NetConn::onSocketConnected, this, socket.data()));
+        //            connect(socket.data(),
+        //                    &QAbstractSocket::disconnected,
+        //                    this,
+        //                    std::bind(&NetConn::onSocketDisconnected, this, socket.data()));
+        //            connect(socket.data(),
+        //                    &QAbstractSocket::readyRead,
+        //                    this,
+        //                    std::bind(&NetConn::onSocketReadyRead, this, socket.data()));
+        //            connect(socket.data(),
+        //                    &QAbstractSocket::errorOccurred,
+        //                    this,
+        //                    std::bind(&NetConn::onSocketError, this, std::placeholders::_1,
+        //                    socket.data()));
+        //        } else {
+        //            qCritical() << "reconnect failed";
+        //        }
+        if (socket->state() != QAbstractSocket::ConnectedState) {
+            socket->abort();
+            qCritical() << "reconnect failed";
+        } else {
+            auto newSocket = createSocketWithSignal(socket);
+        }
+        // 发出取消/执行完成信号
+        promise.set_value();
+    });
+    // 将线程对象分离，让它在后台运行
+    t.detach();
+}
+
+// 取消重连任务的函数
+void NetConn::cancelReconnect() {
+    try {
+        // 如果有重连任务在运行，需要取消
+        if (_reconnectFinalResult.valid()) {
+            // 设置标志位
+            _reconnectCancel = true;
+            // 获取取消重连的完成信号
+            _reconnectFinalResult.get();
+            // 还原标志位
+            _reconnectCancel = false;
+        }
+    } catch (std::exception& error) {
+        qFatal() << "cancel reconnect exception:" << error.what();
+    }
+}
+
+
+void NetConn::onSocketConnected(QSharedPointer<QTcpSocket> socket) {
+    qInfo() << "Connected "
+            << "ip:" << socket->peerAddress() << "port: " << socket->peerPort();
     setState(ConnState::Connected);
+    // client确认连接上就放入列表
+    {
+        std::lock_guard lock(_socketListMutex);
+        _socketList.append(socket);
+        qDebug() << "Current socketlist length after appending: " << _socketList.length();
+    }
 }
 
 void NetConn::onSocketDisconnected(QTcpSocket* socket) {
     qCritical() << "Disconnected "
                 << "ip:" << socket->peerAddress() << "port: " << socket->peerPort();
-    //    socket->abort();
+    // 规定socket断开就清除，重连任务在错误处理里单独建立线程执行，重连上了再加入socketlist
+    // 目前每项Conn里的socketlist只用来管理已建立的socket，其他视作每项本身的信息：
+    // 作为client时，socket对象包含“需要连接的server的信息（地址和端口）"，但这是作为设置项无需在list记录
+    // 作为server时，socket对象包含client的信息，但不会记录“历史连接过的client的信息”
+    socket->abort();
     removeSocket(socket->peerAddress().toString(), socket->peerPort());
 
     // 如果不是server模式（其他模式只能有一个socket），那么就认为连接全部关闭，server模式需要自己手动关闭
     if (_settings.type != ConnType::TcpServer) {
-        //        removeSocket(socket->peerAddress().toString(), socket->peerPort());
+        // 如果不满足以上假设，说明逻辑出现问题，则抛出异常
+        if (!_socketList.empty()) {
+            throw std::runtime_error("disconnect error: socketlist is not empty");
+        }
         setState(ConnState::Disconnected);
     }
 }
@@ -272,11 +402,19 @@ void NetConn::onSocketError(QAbstractSocket::SocketError error, QTcpSocket* sock
     qCritical() << "Socket error:" << error << "ip:" << socket->peerAddress()
                 << "port: " << socket->peerPort();
 
-    // 对于client导致的拒绝连接，需要手动调用disconnect，暂时没有重连机制
+    // 对于client的拒绝连接，需要手动调用disconnect，没有重连机制
     if (_settings.type == ConnType::TcpClient
         && error == QAbstractSocket::SocketError::ConnectionRefusedError) {
         socket->disconnect();
         onSocketDisconnected(socket);
+    }
+
+    // 对于client的服务端关闭错误，根据设置决定是否启动重连线程
+    if (_settings.type == ConnType::TcpClient
+        && error == QAbstractSocket::SocketError::RemoteHostClosedError
+        && _settings.reconnectEnabled) {
+        // 启动重连线程
+        reconnectSocket(socket->peerAddress().toString(), socket->peerPort());
     }
 
     // 传出错误消息
@@ -290,28 +428,13 @@ void NetConn::onSocketError(QAbstractSocket::SocketError error, QTcpSocket* sock
 void NetConn::onTCPServerNewConnectd() {
     // 当前连接来的客户端
     auto nextSocket = _tcpServer->nextPendingConnection();
-    // 转为智能指针后存入socket列表，注意一定要传入删除器，否则断开连接处理会有问题
-    QSharedPointer<QTcpSocket> socket =
-        QSharedPointer<QTcpSocket>(nextSocket, &QTcpSocket::deleteLater);
-    _socketList.append(socket);
-
-    // 添加信号槽
-    connect(socket.data(),
-            &QAbstractSocket::connected,
-            this,
-            std::bind(&NetConn::onSocketConnected, this, socket.data()));
-    connect(socket.data(),
-            &QAbstractSocket::disconnected,
-            this,
-            std::bind(&NetConn::onSocketDisconnected, this, socket.data()));
-    connect(socket.data(),
-            &QAbstractSocket::readyRead,
-            this,
-            std::bind(&NetConn::onSocketReadyRead, this, socket.data()));
-    connect(socket.data(),
-            &QAbstractSocket::errorOccurred,
-            this,
-            std::bind(&NetConn::onSocketError, this, std::placeholders::_1, socket.data()));
+    // 转为智能指针后存入socket列表
+    QSharedPointer<QTcpSocket> socket = createSocketWithSignal(nextSocket);
+    {
+        std::lock_guard lock(_socketListMutex);
+        _socketList.append(socket);
+        qDebug() << "Current socketlist length after appending: " << _socketList.length();
+    }
 }
 
 

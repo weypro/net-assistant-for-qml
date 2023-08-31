@@ -28,7 +28,7 @@ Q_ENUM_NS(ConnState)
 enum class ConnType {
     TcpClient,
     TcpServer,
-    Udp
+    ModbusTcp
 };
 Q_ENUM_NS(ConnType)
 
@@ -51,6 +51,17 @@ public:
     bool timeStampEnabled = true;
     // 接收启用
     bool receiveEnabled = true;
+
+    // 重连设置
+    // 当服务端断连时，作为客户端是否需要断线重连；作为服务端是不需要断线重连的
+    bool reconnectEnabled = true;
+    // 尝试重连的次数
+    int reconnectMaxTimes = 10;
+    // 单次重连的等待时间（毫秒）
+    int reconnectWaitingTime = 1000;
+
+    // 首次建立连接的等待时间
+    int fistWaitingTime = 1000;
 };
 
 }    // namespace net
