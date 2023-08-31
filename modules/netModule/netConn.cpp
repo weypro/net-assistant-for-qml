@@ -8,7 +8,8 @@ namespace net {
 NetConn::NetConn(QObject* parent)
     : QObject {parent}
     , _settings {}
-    , _countEnabled {true} {
+    , _countEnabled {true}
+    , _reconnectCancel {false} {
     resetCount();
 }
 
@@ -226,6 +227,8 @@ QSharedPointer<QTcpSocket> NetConn::createSocketWithSignal(QTcpSocket* rawSocket
 }
 
 inline void NetConn::removeSocket(const QString& address, quint16 port) {
+    qDebug() << "Removesocket "
+             << "ip:" << address << "port: " << port;
     {
         std::lock_guard lock(_socketListMutex);
 
@@ -234,9 +237,6 @@ inline void NetConn::removeSocket(const QString& address, quint16 port) {
         });
         qDebug() << "Current socketlist length after removing: " << _socketList.length();
     }
-
-    qDebug() << "Removesocket "
-             << "ip:" << address << "port: " << port;
 }
 
 void NetConn::reconnectSocket(const QString& address, quint16 port) {
@@ -254,7 +254,7 @@ void NetConn::reconnectSocket(const QString& address, quint16 port) {
         // 尝试重连的次数
         int retry = 0;
         // 创建一个临时的socket对象，用于尝试连接
-        auto socket = new QTcpSocket();
+        auto socket = createSocketWithSignal(new QTcpSocket());
 
         // 循环重连，直到成功或达到最大次数或收到取消信号
         while (true) {
@@ -310,7 +310,19 @@ void NetConn::reconnectSocket(const QString& address, quint16 port) {
             socket->abort();
             qCritical() << "reconnect failed";
         } else {
-            auto newSocket = createSocketWithSignal(socket);
+            //            auto newSocket = createSocketWithSignal(socket);
+            //            newSocket->setSocketDescriptor(socket->socketDescriptor());
+            //            qInfo() << "Connected "
+            //                    << "ip:" << socket->peerAddress() << "port: " <<
+            //                    socket->peerPort();
+            // setState(ConnState::Connected);
+            //  client确认连接上就放入列表
+            //            {
+            //                std::lock_guard lock(_socketListMutex);
+            //                _socketList.append(newSocket);
+            //                qDebug() << "Current socketlist length after appending: " <<
+            //                _socketList.length();
+            //            }
         }
         // 发出取消/执行完成信号
         promise.set_value();
