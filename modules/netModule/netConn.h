@@ -130,7 +130,7 @@ private slots:
     // tcp_server模式下有新客户端连接时
     void onTCPServerNewConnectd();
     // 重连成功时
-    void onReconnectSucceeded();
+    void onReconnectSucceeded() {}
 };
 }    // namespace net
 }    // namespace module

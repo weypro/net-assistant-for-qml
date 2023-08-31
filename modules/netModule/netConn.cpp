@@ -311,6 +311,8 @@ void NetConn::reconnectSocket(const QString& address, quint16 port) {
             qCritical() << "reconnect failed";
         } else {
             auto newSocket = createSocketWithSignal(socket);
+            newSocket->setSocketDescriptor(socket->socketDescriptor());
+            onSocketConnected(newSocket);
         }
         // 发出取消/执行完成信号
         promise.set_value();
