@@ -13,11 +13,14 @@
 #include <mutex>
 #include <thread>
 
+#include <boost/asio.hpp>
+
 #include "netConnItemSettings.h"
 
 namespace module {
 namespace net {
 
+using tcp = boost::asio::ip::tcp;
 
 // 网络连接管理
 class NetConn : public QObject {
@@ -91,6 +94,9 @@ private:
     QList<QSharedPointer<QTcpSocket>> _socketList;
     std::mutex _socketListMutex;
 
+
+    // 创建io_service对象
+    boost::asio::io_service io_service;
 
     // 设置
     NetConnItemSettings _settings;

@@ -11,6 +11,25 @@ NetConn::NetConn(QObject* parent)
     , _countEnabled {true}
     , _reconnectCancel {false} {
     resetCount();
+
+
+    // 创建socket对象
+    tcp::socket socket(io_service);
+
+    // 创建endpoint对象
+    tcp::endpoint endpoint(boost::asio::ip::address::from_string("127.0.0.1"), 5678);
+
+    // 发送消息
+    boost::system::error_code error;
+    try {
+        // 连接服务器
+        socket.connect(endpoint);
+
+        std::string message = "Hello from client";
+        socket.write_some(boost::asio::buffer(message), error);
+    } catch (std::exception& e) {
+        qDebug() << "Write error: " << QString::fromLocal8Bit(e.what());
+    }
 }
 
 QStringList NetConn::connTypeStrList() const {

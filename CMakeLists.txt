@@ -7,6 +7,29 @@ set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 6.4 REQUIRED COMPONENTS Quick)
 
+
+# 自动下载并导入vcpkg
+cmake_policy(SET CMP0135 NEW)
+if(PROJECT_IS_TOP_LEVEL)
+        include(FetchContent)
+        message(STATUS "Fetching vcpkg...")
+        FetchContent_Declare(vcpkg URL "https://github.com/microsoft/vcpkg/archive/master.zip")
+        FetchContent_MakeAvailable(vcpkg)
+        include("${vcpkg_SOURCE_DIR}/scripts/buildsystems/vcpkg.cmake")
+endif()
+# 导入fmt
+find_package(fmt CONFIG REQUIRED)
+# 导入boost
+set(Boost_USE_STATIC_LIBS        ON)  # only find static libs
+#set(Boost_USE_DEBUG_LIBS        OFF)  # ignore debug libs and
+#set(Boost_USE_RELEASE_LIBS       ON)  # only find release libs
+set(Boost_USE_MULTITHREADED      ON)
+find_package(Boost COMPONENTS system REQUIRED) # system是asio依赖的组件
+if (Boost_FOUND)
+  include_directories(${Boost_INCLUDE_DIRS})
+  link_directories(${Boost_LIBRARY_DIRS})
+endif()
+
 qt_standard_project_setup()
 
 qt_add_executable(appnetassistant
@@ -49,6 +72,8 @@ set_target_properties(appnetassistant PROPERTIES
 
 target_link_libraries(appnetassistant
     PRIVATE Qt6::Quick
+    fmt::fmt
+    Boost::system
 )
 
 include(GNUInstallDirs)
