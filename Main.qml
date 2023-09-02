@@ -119,6 +119,7 @@ ApplicationWindow {
                             id: historyArea
                             readOnly: true // 只读模式，不可编辑
                             wrapMode: TextArea.WrapAnywhere
+                            cursorPosition: text.length
                         }
                     }
                     // 需要发送的消息文本框和发送按钮

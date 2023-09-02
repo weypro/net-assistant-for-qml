@@ -9,14 +9,16 @@
 #include <QStringListModel>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <deque>
 #include <future>
+#include <iostream>
 #include <mutex>
 #include <thread>
 
+#include <boost/array.hpp>
 #include <boost/asio.hpp>
 
 #include "netConnItemSettings.h"
-
 namespace module {
 namespace net {
 
@@ -27,6 +29,7 @@ class NetConn : public QObject {
     Q_OBJECT
 public:
     explicit NetConn(QObject* parent = nullptr);
+    ~NetConn();
 
     // 获取连接类型字符串表，用于combobox显示
     Q_INVOKABLE QStringList connTypeStrList() const;
@@ -39,7 +42,7 @@ public:
     // 获取接收启用设置
     Q_INVOKABLE bool receiveEnableState() const;
     // socket群发消息
-    Q_INVOKABLE void socketGroupSendMsg(const QString& message) const;
+    Q_INVOKABLE void socketGroupSendMsg(const QString& message);
 
 public slots:
     // 初始化
@@ -91,9 +94,10 @@ private:
     QSharedPointer<QTcpServer> _tcpServer;
     // 用来管理已建立的socket
     // 默认非server模式下，用且仅用列表里的第0个socket
-    QList<QSharedPointer<QTcpSocket>> _socketList;
+    //    QList<QSharedPointer<QTcpSocket>> _socketList;
     std::mutex _socketListMutex;
-
+    std::vector<tcp::socket> _socketList;
+    // boost::asio的设计导致记录raw socket是不合适的，
 
     // 创建io_service对象
     boost::asio::io_service io_service;
@@ -108,6 +112,8 @@ private:
     uint64_t _sendBytesCount;
     // 计数启用
     bool _countEnabled;
+
+    boost::asio::io_context io_context;
 
     // 重连取消/完成信号，现在只有client一个socket需要重连，不需要线程池
     std::future<void> _reconnectFinalResult;
@@ -124,6 +130,149 @@ private:
     inline void reconnectSocket(const QString& address, quint16 port);
     // 取消重连
     void cancelReconnect();
+
+    std::thread serviceThread;
+    void doReadSocket(boost::asio::io_context& io_context) {
+        qDebug() << "asdf";
+        try {
+            auto& socket = _socketList[0];
+            std::array<char, 128> recv_buf;
+            while (1) {
+                if (stopFlag) {
+                    break;
+                }
+                try {
+                    std::future<std::size_t> recv_length = socket.async_read_some(
+                        boost::asio::buffer(recv_buf), boost::asio::use_future);
+
+                    // Do other things here while the receive completes.
+
+                    std::string bufstr;
+                    bufstr.append(recv_buf.data(), recv_length.get());
+                    //            qDebug() << bufstr;
+                    //                std::cout<<bufstr;
+                    qDebug() << bufstr;
+                    emit messageChanged(QString::fromStdString(bufstr));
+                } catch (std::exception& error) {
+                    // 断开连接在有async read的地方处理
+                    qDebug() << socket.remote_endpoint().port();
+                    {
+                        qDebug() << "remove";
+                        try {
+                            closeSocket(socket);
+
+                            if (_settings.type == ConnType::TcpClient) {
+                                // 假设client模式下在断联后_socketList的长度应该为0，否则抛异常
+                                if (_socketList.size() != 0) {
+                                    qDebug() << "list size err";
+                                    throw std::runtime_error("list size err");
+                                } else {
+                                    setState(ConnState::Disconnected);
+                                }
+                            }
+                            qDebug() << "Current socketlist length after removing: "
+                                     << _socketList.size();
+                        } catch (...) {
+                            qDebug() << "exception:Current socketlist length after removing: "
+                                     << _socketList.size();
+                        }
+                    }
+
+                    // emit errorOccurred(QString(error.what()));
+                    break;
+                }
+            }
+        } catch (std::system_error& e) {
+            qDebug() << e.what();
+        }
+    }
+
+
+    void do_write() {
+        auto& socket = _socketList[0];
+        boost::asio::async_write(
+            socket,
+            boost::asio::buffer(write_msgs_.front().data(), write_msgs_.front().length()),
+            [this, &socket](boost::system::error_code ec, std::size_t /*length*/) {
+                if (!ec) {
+                    write_msgs_.pop_front();
+                    if (!write_msgs_.empty()) {
+                        do_write();
+                    }
+                } else {
+                    emit errorOccurred(QString::fromStdString(ec.what()));
+                }
+            });
+    }
+
+
+    void write(const std::string& msg) {
+        boost::asio::post(io_context, [this, msg]() {
+            bool write_in_progress = !write_msgs_.empty();
+            write_msgs_.push_back(msg);
+            if (!write_in_progress) {
+                do_write();
+            }
+        });
+    }
+    std::deque<std::string> write_msgs_;
+
+    //    boost::asio::io_service::strand strand_;
+    std::shared_ptr<boost::asio::io_service::strand> strand_;
+    std::shared_ptr<tcp::acceptor> acceptor_;
+
+
+    void server_run() {
+        acceptor_->async_accept([this](boost::system::error_code ec, tcp::socket socket) {
+            if (!ec) {
+                emit messageChanged(QString("new client"));
+                {
+                    std::lock_guard lock(_socketListMutex);
+                    this->_socketList.push_back(std::move(socket));
+                }
+
+                std::thread t(
+                    [this, &io_context = io_context]() { this->doReadSocket(io_context); });
+                t.detach();
+            } else {
+                // 在监听器关闭后，所有记录的连接也要清除
+                try {
+                    for(const auto& socket:this->_socketList){
+                        closeSocket(socket);
+                    }
+                } catch (...) {
+                    qDebug() << "exception:Current socketlist length after removing: "
+                             << this->_socketList.size();
+                }
+                // 最后设置状态
+                this->setState(ConnState::Disconnected);
+                return;
+            }
+
+            server_run();
+        });
+    }
+
+    void closeSocket(const tcp::socket& socket){
+        std::lock_guard lock(_socketListMutex);
+        // 注意在删除前不能写socket.close();
+        _socketList.erase(
+            std::remove_if(_socketList.begin(),
+                           _socketList.end(),
+                           [&](const tcp::socket& i) {
+                               if (i.remote_endpoint().port()
+                                       == socket.remote_endpoint().port()
+                                   && i.remote_endpoint().address()
+                                       == socket.remote_endpoint().address())
+                                   return true;
+                               else
+                                   return false;
+                           }),
+            _socketList.end());
+    }
+
+    std::atomic<bool> stopFlag;
+
 private slots:
     // 套接字连接成功时
     void onSocketConnected(QSharedPointer<QTcpSocket> socket);

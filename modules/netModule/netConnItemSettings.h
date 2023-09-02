@@ -34,7 +34,6 @@ Q_ENUM_NS(ConnType)
 
 }    // namespace connEnum
 
-
 // 网络连接设置
 class NetConnItemSettings : public QObject {
     Q_OBJECT
