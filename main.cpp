@@ -1,10 +1,13 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
-
+#include <QQuickWindow>
 #include "modules/netModule/NetConn.h"
 
 int main(int argc, char *argv[])
 {
+    // 这一句能让窗口移动时看起来不那么卡
+    QQuickWindow::setDefaultAlphaBuffer(true);
+
     QGuiApplication app(argc, argv);
 
     QQmlApplicationEngine engine;
