@@ -58,6 +58,7 @@ qt_add_qml_module(appnetassistant
         SOURCES modules/netModule/netConn.h
         SOURCES modules/netModule/netConn.cpp
         SOURCES modules/netModule/netConnItemSettings.h
+        SOURCES modules/netModule/MessagePacket.h
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.

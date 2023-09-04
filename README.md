@@ -20,6 +20,8 @@ https://blog.csdn.net/lordman19820219/article/details/130840929
 
 https://www.jetbrains.com/help/clion/qt-tutorial.html#troubleshooting
 
+以链接1为例，加入`-DCMAKE_PREFIX_PATH=C:\Qt\6.5.2\mingw_64\lib\cmake -Wno-dev`
+
 vcpkg默认会自动下载，无需配置，也可以自行修改cmake以手动安装
 
 在debug/release configuration有设置environment variables系统变量的地方，需要自行修改path来模拟qtcreator的做法（见qtcreator项目配置项中的add build library search path to PATH）

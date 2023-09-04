@@ -11,7 +11,7 @@
 
 using boost::asio::ip::tcp;
 
-// typedef std::deque<chat_message> chat_message_queue;
+// typedef std::deque<MessagePacket> MessageQueue;
 const int max_length = 256;
 
 
@@ -23,7 +23,7 @@ public:
         //        do_connect(endpoints);
     }
 
-    //    void write(const chat_message &msg)
+    //    void write(const MessagePacket &msg)
     //    {
     //        boost::asio::post(io_context_, [this, msg]() {
     //            bool write_in_progress = !write_msgs_.empty();
@@ -157,15 +157,18 @@ bool NetConn::receiveEnableState() const {
 }
 
 void NetConn::socketGroupSendMsg(const QString& message) {
-    QByteArray data = message.toLocal8Bit();
-    for (const auto& socket : _socketList) {
-        write(data.toStdString());
-        //                    socket->write(data);
-        //                    // 立刻发送缓存数据，避免阻塞
-        //                    if (!socket->flush()) {
-        //                        throw std::runtime_error("write failed");
-        //                    }
-    }
+    //    QByteArray data = message.toLocal8Bit();
+    //    for (const auto& socket : _socketList) {
+    //        write(data.toStdString());
+    //        //                    socket->write(data);
+    //        //                    // 立刻发送缓存数据，避免阻塞
+    //        //                    if (!socket->flush()) {
+    //        //                        throw std::runtime_error("write failed");
+    //        //                    }
+    //    }
+    MessagePacket msg;
+    msg.setText(message.toStdString());
+    _server->room().deliver(msg);
 }
 
 
@@ -173,7 +176,17 @@ void NetConn::init() {
     serviceThread = std::thread([&io_context = io_context]() {
         qDebug() << "service start";
         auto work = boost::asio::make_work_guard(io_context);
-        io_context.run();
+        while(1)
+        {
+            try
+            {
+                io_context.run();
+                break; // 正常退出
+            }
+            catch (std::exception& error){
+                qDebug() <<"io err:"<<QString::fromStdString(error.what());
+            }
+        }
         qDebug() << "service stop";
     });
 }
@@ -236,9 +249,10 @@ void NetConn::run() {
             tcp::endpoint endpoint(boost::asio::ip::address::from_string(
                                        _settings.serverAddress.toString().toStdString()),
                                    _settings.port);
-            acceptor_ = std::make_shared<tcp::acceptor>(io_context,endpoint);
-
-            server_run();
+            //            acceptor_ = std::make_shared<tcp::acceptor>(io_context,endpoint);
+            //
+            //            server_run();
+            _server = std::make_shared<chat_server>(io_context, endpoint, io_context, this);
             setState(ConnState::Connected);
         } else {
             setState(ConnState::Disconnected);
@@ -254,10 +268,16 @@ void NetConn::stop() {
             // 默认非server模式下，用且仅用列表里的第0个socket
             //            auto socket = _socketList.at(0);
             //            socket->disconnectFromHost();
-            auto& socket_=_socketList[0];
+            auto& socket_ = _socketList[0];
             boost::asio::post(io_context, [&]() { closeSocket(socket_); });
         } else if (_settings.type == ConnType::TcpServer) {
-            boost::asio::post(io_context, [&]() { acceptor_->close(); });
+            //            boost::asio::post(io_context, [&]() { acceptor_->close(); });
+            try {
+                _server.reset();
+                setState(ConnState::Disconnected);
+            } catch (...) {
+                qDebug() << "server close err";
+            }
             // server需要手动调用函数关闭连接，并手动释放
             //            _tcpServer->disconnect();
             //            _tcpServer->close();
@@ -273,13 +293,12 @@ void NetConn::stop() {
 }
 
 void NetConn::connectBtnClicked() {
-    qDebug() << "ok";
+    qDebug() << "_closeReady";
 
     if (_state != ConnState::Disconnected) {
-                    stop();
+        stop();
     } else {
-                            run();
-
+        run();
     }
 
     //    try {
@@ -599,6 +618,72 @@ void NetConn::onTCPServerNewConnectd() {
     //    }
 }
 
+
+void chat_server::do_accept() {
+    acceptor_.async_accept([this](boost::system::error_code ec, tcp::socket socket) {
+        if (!ec) {
+            this->_conn->showReceiveMessage(QString("new client2"));
+            std::make_shared<chat_session>(std::move(socket), room_)->start();
+        } else {
+            if (ec != boost::asio::error::operation_aborted) {
+                qDebug() << "connection failed {}" << ec.what();
+            }
+            qDebug() << "accept close";
+            return;
+        }
+
+        do_accept();
+    });
+}
+
+chat_session::~chat_session() {
+    close();
+}
+
+void chat_session::close() {
+    _closeRequest = true;
+    auto& context = room_.server()->context();
+    boost::asio::post(context, [this, &socket = socket_]() mutable {
+        socket.close();
+        _closeReady = true;
+        qDebug() << "session deconstruct";
+    });
+    while (!_closeReady) {
+        ;
+    }
+}
+
+void chat_session::do_read_body() {
+    auto self(shared_from_this());
+    auto& context = room_.server()->context();
+    auto conn = room_.server()->conn();
+    socket_.async_read_some(
+        boost::asio::buffer(read_msg_.data(), read_msg_.maxLength),
+        [this, self, conn](boost::system::error_code ec, std::size_t length) {
+            if (self->_closeRequest) {
+                return;
+            }
+            if (!ec) {
+                read_msg_.setLength(length);
+                conn->showReceiveMessage(QString::fromStdString(read_msg_.text()));
+                qDebug() << "chat recv" << read_msg_.text();
+                do_read_body();
+            } else {
+                room_.leave(shared_from_this());
+            }
+        });
+}
+
+void chat_session::deliver(const MessagePacket& msg) {
+    auto& context = room_.server()->context();
+    boost::asio::post(context, [this, msg]() {
+        bool write_in_progress = !write_msgs_.empty();
+        write_msgs_.push_back(msg);
+        if (!write_in_progress) {
+            do_write();
+        }
+    });
+}
 
 }    // namespace net
 }    // namespace module

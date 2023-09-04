@@ -9,20 +9,186 @@
 #include <QStringListModel>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <cstdlib>
 #include <deque>
 #include <future>
 #include <iostream>
+#include <list>
+#include <memory>
 #include <mutex>
+#include <set>
 #include <thread>
+#include <utility>
 
 #include <boost/array.hpp>
 #include <boost/asio.hpp>
 
+#include "MessagePacket.h"
 #include "netConnItemSettings.h"
+
+
 namespace module {
 namespace net {
 
 using tcp = boost::asio::ip::tcp;
+
+
+class NetConn;
+class chat_server;
+
+//----------------------------------------------------------------------
+
+class chat_room {
+public:
+    void join(chat_participant_ptr participant) {
+        participants_.insert(participant);
+    }
+
+    void leave(chat_participant_ptr participant) {
+        participants_.erase(participant);
+    }
+
+    void setServer(chat_server* s) {
+        _server = s;
+    }
+
+    chat_server* server() {
+        return _server;
+    }
+
+    void deliver(const MessagePacket& msg) {
+        for (auto participant : participants_)
+            participant->deliver(msg);
+    }
+
+    void close(){
+        for(auto& item:participants_){
+            item->close();
+        }
+        participants_.clear();
+        qDebug()<<"room close";
+    }
+
+private:
+    std::set<chat_participant_ptr> participants_;
+    chat_server* _server;
+};
+
+//----------------------------------------------------------------------
+
+class chat_session
+    : public chat_participant
+    , public std::enable_shared_from_this<chat_session> {
+public:
+    chat_session(tcp::socket socket, chat_room& room)
+        : socket_(std::move(socket))
+        , room_(room) {}
+    ~chat_session();
+
+    void start() {
+        room_.join(shared_from_this());
+        do_read_body();
+    }
+
+    void deliver(const MessagePacket& msg);
+
+    void close();
+
+private:
+    void do_read_body();
+
+    void do_write() {
+        auto self(shared_from_this());
+        boost::asio::async_write(
+            socket_,
+            boost::asio::buffer(write_msgs_.front().data(), write_msgs_.front().length()),
+            [this, self](boost::system::error_code ec, std::size_t /*length*/) {
+                if(self->_closeRequest){
+                    return;
+                }
+                if (!ec) {
+                    write_msgs_.pop_front();
+                    if (!write_msgs_.empty()) {
+                        do_write();
+                    }
+                } else {
+                    room_.leave(shared_from_this());
+                }
+            });
+    }
+
+    tcp::socket socket_;
+    chat_room& room_;
+    MessagePacket read_msg_;
+    MessageQueue write_msgs_;
+
+    // 用于同步，是否有关闭请求
+    std::atomic<bool> _closeRequest = false;
+    // 用于同步，在关闭前无法析构
+    std::atomic<bool> _closeReady = false;
+};
+
+//----------------------------------------------------------------------
+
+class chat_server {
+public:
+    explicit chat_server(boost::asio::io_context& io_context, const tcp::endpoint& endpoint,
+                         boost::asio::io_context& context, NetConn* conn)
+        : acceptor_(io_context, endpoint)
+        , _conn(conn)
+        , io_context(context) {
+        room_.setServer(this);
+        do_accept();
+    }
+
+    // 构造即启动，析构即关闭
+    ~chat_server() {
+        close();
+        while (!_closeReady) {
+            ;
+        }
+        qDebug()<<"server deconstruct";
+    };
+
+    // 删除拷贝构造和赋值
+    chat_server(chat_server& s) = delete;
+    chat_server& operator=(const chat_server& s) = delete;
+    chat_server(chat_server&& s) = default;
+    chat_server& operator=(chat_server&& s) = default;
+
+    chat_room& room() {
+        return room_;
+    }
+
+    NetConn* conn() {
+        return _conn;
+    }
+
+    boost::asio::io_context& context() {
+        return io_context;
+    }
+
+private:
+    void do_accept();
+
+    tcp::acceptor acceptor_;
+    chat_room room_;
+    // 无conn所有权，仅为方便调用
+    NetConn* _conn;
+    boost::asio::io_context& io_context;
+
+    // 用于同步，在关闭前无法析构
+    std::atomic<bool> _closeReady = false;
+
+    void close() {
+        boost::asio::post(io_context, [&]() {
+            acceptor_.close();
+            room_.close();
+            _closeReady = true;
+        });
+    }
+};
+
 
 // 网络连接管理
 class NetConn : public QObject {
@@ -76,6 +242,9 @@ public slots:
     // 主动断开连接
     void disconnectToClient(QString address, quint16 port);
 
+    void showReceiveMessage(const QString& message) {
+        emit messageChanged(message);
+    }
 
 signals:
     // 连接状态改变
@@ -237,7 +406,7 @@ private:
             } else {
                 // 在监听器关闭后，所有记录的连接也要清除
                 try {
-                    for(const auto& socket:this->_socketList){
+                    for (const auto& socket : this->_socketList) {
                         closeSocket(socket);
                     }
                 } catch (...) {
@@ -253,15 +422,14 @@ private:
         });
     }
 
-    void closeSocket(const tcp::socket& socket){
+    void closeSocket(const tcp::socket& socket) {
         std::lock_guard lock(_socketListMutex);
         // 注意在删除前不能写socket.close();
         _socketList.erase(
             std::remove_if(_socketList.begin(),
                            _socketList.end(),
                            [&](const tcp::socket& i) {
-                               if (i.remote_endpoint().port()
-                                       == socket.remote_endpoint().port()
+                               if (i.remote_endpoint().port() == socket.remote_endpoint().port()
                                    && i.remote_endpoint().address()
                                        == socket.remote_endpoint().address())
                                    return true;
@@ -270,6 +438,8 @@ private:
                            }),
             _socketList.end());
     }
+
+    std::shared_ptr<chat_server> _server;
 
     std::atomic<bool> stopFlag;
 
