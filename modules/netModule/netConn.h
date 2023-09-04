@@ -13,14 +13,14 @@
 #include <mutex>
 #include <thread>
 
-#include <boost/asio.hpp>
+//#include <asio2/tcp/tcp_server.hpp>
 
-#include "netConnItemSettings.h"
+#include "netConnItem.h"
 
 namespace module {
 namespace net {
 
-using tcp = boost::asio::ip::tcp;
+
 
 // 网络连接管理
 class NetConn : public QObject {
@@ -94,10 +94,6 @@ private:
     QList<QSharedPointer<QTcpSocket>> _socketList;
     std::mutex _socketListMutex;
 
-
-    // 创建io_service对象
-    boost::asio::io_service io_service;
-
     // 设置
     NetConnItemSettings _settings;
     // 连接状态
@@ -116,6 +112,8 @@ private:
     // 设置状态并发出信号
     void setState(const ConnState state);
 
+
+    NetConnItem item;
     // 创建绑定信号后的socket
     QSharedPointer<QTcpSocket> createSocketWithSignal(QTcpSocket* rawSocketPtr);
     // 从列表中清除指定socket，当连接被动断开时，也应该调用该函数

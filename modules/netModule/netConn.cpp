@@ -11,25 +11,6 @@ NetConn::NetConn(QObject* parent)
     , _countEnabled {true}
     , _reconnectCancel {false} {
     resetCount();
-
-
-    // 创建socket对象
-    tcp::socket socket(io_service);
-
-    // 创建endpoint对象
-    tcp::endpoint endpoint(boost::asio::ip::address::from_string("127.0.0.1"), 5678);
-
-    // 发送消息
-    boost::system::error_code error;
-    try {
-        // 连接服务器
-        socket.connect(endpoint);
-
-        std::string message = "Hello from client";
-        socket.write_some(boost::asio::buffer(message), error);
-    } catch (std::exception& e) {
-        qDebug() << "Write error: " << QString::fromLocal8Bit(e.what());
-    }
 }
 
 QStringList NetConn::connTypeStrList() const {
@@ -74,7 +55,11 @@ void NetConn::socketGroupSendMsg(const QString& message) const {
 }
 
 
-void NetConn::init() {}
+void NetConn::init() {
+    item.init();
+
+
+}
 
 void NetConn::setConnType(ConnType type) {
     _settings.type = type;
@@ -98,7 +83,7 @@ void NetConn::run() {
     qDebug() << "run" << _state;
 
     // 取消重连任务
-    cancelReconnect();
+    //    cancelReconnect();
 
     // 如果是未连接则开始连接或监听，否则将跳过
     if (_state == ConnState::Disconnected) {
@@ -106,40 +91,41 @@ void NetConn::run() {
 
         // 根据不同类型分别启动，不写switch是因为会出现jump passby跳过初始化报错
         if (_settings.type == ConnType::TcpClient) {
-            // 初始化
-            QSharedPointer<QTcpSocket> socket = createSocketWithSignal(new QTcpSocket());
-            //            {
-            //                std::lock_guard lock(_socketListMutex);
-            //                _socketList.append(socket);
+            //            // 初始化
+            //            QSharedPointer<QTcpSocket> socket = createSocketWithSignal(new
+            //            QTcpSocket());
+            //            //            {
+            //            //                std::lock_guard lock(_socketListMutex);
+            //            //                _socketList.append(socket);
+            //            //            }
+            //            setState(ConnState::Connecting);
+            //            // 开始连接，连接状态会在槽函数中改变
+            //            socket->connectToHost(_settings.serverAddress, _settings.port);
+            //            if (!socket->waitForConnected(_settings.fistWaitingTime)) {
+            //                qCritical() << "cannot connect";
+            //                setState(ConnState::Disconnected);
             //            }
-            setState(ConnState::Connecting);
-            // 开始连接，连接状态会在槽函数中改变
-            socket->connectToHost(_settings.serverAddress, _settings.port);
-            if (!socket->waitForConnected(_settings.fistWaitingTime)) {
-                qCritical() << "cannot connect";
-                setState(ConnState::Disconnected);
-            }
+
+            // bind member function
+            //            client->bind_disconnect(&clt_listener::on_disconnect, clientlistener);
+            //            client->bind_connect(
+            //                &clt_listener::on_connect, clientlistener, std::ref(*client.get()));
+            //            client->bind_recv(&clt_listener::on_recv,
+            //                              clientlistener,
+            //                              std::ref(*client.get()));    // not use std::bind
+            //
+            //            client->start(_settings.serverAddress.toString().toStdString(),
+            //                          std::to_string(_settings.port));
+
+            item.setType(_settings.type);
+            item.run(_settings.serverAddress.toString().toStdString(),
+                     std::to_string(_settings.port));
 
         } else if (_settings.type == ConnType::TcpServer) {
-            // 初始化
-            _tcpServer = QSharedPointer<QTcpServer>(new QTcpServer(this), &QTcpServer::deleteLater);
-            // 绑定信号
-            connect(_tcpServer.data(),
-                    &QTcpServer::newConnection,
-                    this,
-                    &NetConn::onTCPServerNewConnectd);
-            // 开始监听，server可以直接判断listen是否成功，client socket就要在错误响应里判断
-            if (!_tcpServer->listen(QHostAddress(_settings.serverAddress), _settings.port)) {
-                qDebug() << "server err" << _tcpServer->errorString();
-                setState(ConnState::Disconnected);
+            item.setType(_settings.type);
+            item.run(_settings.serverAddress.toString().toStdString(),
+                     std::to_string(_settings.port));
 
-                return;
-            } else {
-                qDebug() << "server start" << _settings.serverAddress << _settings.port;
-                setState(ConnState::Connected);
-
-                return;
-            }
         } else {
             setState(ConnState::Disconnected);
         }
@@ -151,18 +137,13 @@ void NetConn::stop() {
     if (_state == ConnState::Connected) {
         // 根据不同类型分别停止
         if (_settings.type == ConnType::TcpClient) {
-            // 默认非server模式下，用且仅用列表里的第0个socket
-            auto socket = _socketList.at(0);
-            socket->disconnectFromHost();
+            //            // 默认非server模式下，用且仅用列表里的第0个socket
+            //            auto socket = _socketList.at(0);
+            //            socket->disconnectFromHost();
+            item.stop();
+            setState(ConnState::Disconnected);
         } else if (_settings.type == ConnType::TcpServer) {
-            // server需要手动调用函数关闭连接，并手动释放
-            _tcpServer->disconnect();
-            _tcpServer->close();
-            {
-                std::lock_guard lock(_socketListMutex);
-
-                _socketList.clear();
-            }
+            item.stop();
             setState(ConnState::Disconnected);
         } else {
         }
@@ -225,22 +206,22 @@ QSharedPointer<QTcpSocket> NetConn::createSocketWithSignal(QTcpSocket* rawSocket
     QSharedPointer<QTcpSocket> socket =
         QSharedPointer<QTcpSocket>(rawSocketPtr, &QTcpSocket::deleteLater);
     // 绑定信号
-    connect(socket.data(),
-            &QAbstractSocket::connected,
-            this,
-            std::bind(&NetConn::onSocketConnected, this, socket));
-    connect(socket.data(),
-            &QAbstractSocket::disconnected,
-            this,
-            std::bind(&NetConn::onSocketDisconnected, this, socket.data()));
-    connect(socket.data(),
-            &QAbstractSocket::readyRead,
-            this,
-            std::bind(&NetConn::onSocketReadyRead, this, socket.data()));
-    connect(socket.data(),
-            &QAbstractSocket::errorOccurred,
-            this,
-            std::bind(&NetConn::onSocketError, this, std::placeholders::_1, socket.data()));
+//    connect(socket.data(),
+//            &QAbstractSocket::connected,
+//            this,
+//            std::bind(&NetConn::onSocketConnected, this, socket));
+//    connect(socket.data(),
+//            &QAbstractSocket::disconnected,
+//            this,
+//            std::bind(&NetConn::onSocketDisconnected, this, socket.data()));
+//    connect(socket.data(),
+//            &QAbstractSocket::readyRead,
+//            this,
+//            std::bind(&NetConn::onSocketReadyRead, this, socket.data()));
+//    connect(socket.data(),
+//            &QAbstractSocket::errorOccurred,
+//            this,
+//            std::bind(&NetConn::onSocketError, this, std::placeholders::_1, socket.data()));
 
     return socket;
 }

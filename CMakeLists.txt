@@ -29,6 +29,17 @@ if (Boost_FOUND)
   include_directories(${Boost_INCLUDE_DIRS})
   link_directories(${Boost_LIBRARY_DIRS})
 endif()
+# 导入asio2
+include_directories(include)
+
+# 避免file too big
+if(CMAKE_COMPILER_IS_GNUCXX)
+    #检查GNU是否支持-Wa,-mbig-obj
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-Wa,-mbig-obj" GNU_BIG_OBJ_FLAG_ENABLE)
+    message(STATUS GNU_BIG_OBJ_FLAG_ENABLE=${GNU_BIG_OBJ_FLAG_ENABLE})
+endif()
+
 
 qt_standard_project_setup()
 
@@ -57,6 +68,10 @@ qt_add_qml_module(appnetassistant
     SOURCES modules/netModule/netConn.h
     SOURCES modules/netModule/netConn.cpp
     SOURCES modules/netModule/netConnItemSettings.h
+    SOURCES modules/netModule/tcpClientHandler.h
+    SOURCES modules/netModule/tcpClientHandler.cpp
+        SOURCES modules/netModule/netConnItem.h
+        SOURCES modules/netModule/netConnItem.cpp
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
@@ -70,11 +85,30 @@ set_target_properties(appnetassistant PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
 
+#target_compile_options(appnetassistant
+#        PRIVATE
+#        $<$<CXX_COMPILER_ID:MSVC>:/bigobj>
+#        $<$<AND:$<CXX_COMPILER_ID:GNU>,$<BOOL:${GNU_BIG_OBJ_FLAG_ENABLE}>>:-Wa,-mbig-obj>
+#)
+if(MSVC)
+    target_compile_options(appnetassistant PRIVATE /bigobj)
+elseif(CMAKE_COMPILER_IS_GNUCXX)
+    target_compile_options(appnetassistant PRIVATE -Wa,-mbig-obj)
+endif()
+
+
 target_link_libraries(appnetassistant
     PRIVATE Qt6::Quick
     fmt::fmt
     Boost::system
 )
+
+if (WIN32)
+    target_link_libraries(appnetassistant
+            PRIVATE wsock32
+            ws2_32
+    )
+endif ()
 
 include(GNUInstallDirs)
 install(TARGETS appnetassistant
