@@ -39,7 +39,9 @@ public:
     // 获取接收启用设置
     Q_INVOKABLE bool receiveEnableState() const;
     // socket群发消息
-    Q_INVOKABLE void socketGroupSendMsg(const QString& message) const;
+    Q_INVOKABLE void socketGroupSendMsg(const QString& message);
+    // socket接受消息显示
+    Q_INVOKABLE void showReceivedMsg(const std::string& message);
 
 public slots:
     // 初始化
@@ -70,10 +72,8 @@ public slots:
     // 设置计数启用状态
     void setCountEnabledState(bool state);
 
-    // 主动断开连接
-    void disconnectToClient(QString address, quint16 port);
-
-
+    // 设置状态并发出信号
+    void setState(const ConnState state);
 signals:
     // 连接状态改变
     void stateChanged(const ConnState state);
@@ -109,32 +109,8 @@ private:
     std::future<void> _reconnectFinalResult;
     std::atomic<bool> _reconnectCancel;
 
-    // 设置状态并发出信号
-    void setState(const ConnState state);
-
 
     NetConnItem item;
-    // 创建绑定信号后的socket
-    QSharedPointer<QTcpSocket> createSocketWithSignal(QTcpSocket* rawSocketPtr);
-    // 从列表中清除指定socket，当连接被动断开时，也应该调用该函数
-    inline void removeSocket(const QString& address, quint16 port);
-    // 重新连接
-    inline void reconnectSocket(const QString& address, quint16 port);
-    // 取消重连
-    void cancelReconnect();
-private slots:
-    // 套接字连接成功时
-    void onSocketConnected(QSharedPointer<QTcpSocket> socket);
-    // 套接字断开连接时
-    void onSocketDisconnected(QTcpSocket* socket);
-    // 套接字有可读数据时
-    void onSocketReadyRead(QTcpSocket* socket);
-    // 套接字发生错误时
-    void onSocketError(QAbstractSocket::SocketError error, QTcpSocket* socket);
-    // tcp_server模式下有新客户端连接时
-    void onTCPServerNewConnectd();
-    // 重连成功时
-    void onReconnectSucceeded() {}
 };
 }    // namespace net
 }    // namespace module

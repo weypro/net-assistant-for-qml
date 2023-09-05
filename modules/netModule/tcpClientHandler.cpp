@@ -1,65 +1,45 @@
 #include "tcpClientHandler.h"
 
+#include "netConn.h"
 namespace module {
 namespace net {
 
 void clt_listener::on_connect(asio2::tcp_client& client) {
-    if (asio2::get_last_error())
-        printf("connect failure : %d %s\n",
-               asio2::last_error_val(),
-               asio2::last_error_msg().c_str());
-    else
+    if (asio2::get_last_error()) {
+        if (_conn != nullptr)
+            _conn->setState(connEnum::ConnState::Disconnected);
         printf(
-            "connect success : %s %u\n", client.local_address().c_str(), client.local_port());
-
-    std::string str;
-    int len = 128 + std::rand() % (300);
-    for (int i = 0; i < len; i++) {
-        str += (char)((std::rand() % 26) + 'a');
+            "connect failure : %d %s\n", asio2::last_error_val(), asio2::last_error_msg().c_str());
+    } else {
+        if (_conn != nullptr)
+            _conn->setState(connEnum::ConnState::Connected);
+        printf("connect success : %s %u\n", client.local_address().c_str(), client.local_port());
     }
-    str += "\r\n";
-
-    client.async_send(std::move(str));
 }
 
 void clt_listener::on_disconnect() {
-    printf("disconnect : %d %s\n", asio2::last_error_val(), asio2::last_error_msg().c_str());
+    if (_conn != nullptr)
+        _conn->setState(connEnum::ConnState::Disconnected);
 }
 
 void clt_listener::on_recv(asio2::tcp_client& client, std::string_view data) {
     printf("recv : %zu %.*s\n", data.size(), (int)data.size(), data.data());
 
-    std::string str;
-    int len = 128 + std::rand() % (300);
-    for (int i = 0; i < len; i++) {
-        str += (char)((std::rand() % 26) + 'a');
-    }
-    str += "\r\n";
-
-    // this is just a demo to show :
-    // even if we force one packet data to be sent twice,
-    // but the server must recvd whole packet once
-    client.async_send(str.substr(0, str.size() / 2));
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    client.async_send(str.substr(str.size() / 2));
-    client.async_send(std::string("test"));
-    // of course you can sent the whole data once
-    // client.async_send(std::move(str));
+    if (_conn != nullptr)
+        _conn->showReceivedMsg(std::string(data));
 }
 
+
+void clt_listener::init(NetConn* conn) {
+    _conn = conn;
+}
 
 /****************************/
 
 void svr_listener::on_recv(std::shared_ptr<asio2::tcp_session>& session_ptr, std::string_view data)
 {
-    printf("recv : %zu %.*s\n", data.size(), (int)data.size(), data.data());
-
-    // this is just a demo to show :
-    // even if we force one packet data to be sent twice,
-    // but the client must recvd whole packet once
-    session_ptr->async_send(data.substr(0, data.size() / 2));
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    session_ptr->async_send(data.substr(data.size() / 2));
+    if (_conn != nullptr)
+        _conn->showReceivedMsg(std::string(data));
 }
 
 void svr_listener::on_connect(std::shared_ptr<asio2::tcp_session>& session_ptr)
@@ -80,16 +60,37 @@ void svr_listener::on_disconnect(std::shared_ptr<asio2::tcp_session>& session_pt
 
 void svr_listener::on_start(asio2::tcp_server& server)
 {
-    printf("start tcp server character : %s %u %d %s\n",
-           server.listen_address().c_str(), server.listen_port(),
-           asio2::last_error_val(), asio2::last_error_msg().c_str());
+    if (asio2::get_last_error()) {
+        if (_conn != nullptr)
+            _conn->setState(connEnum::ConnState::Disconnected);
+        printf("start tcp server character failed : %s %u %d %s\n",
+               server.listen_address().c_str(),
+               server.listen_port(),
+               asio2::last_error_val(),
+               asio2::last_error_msg().c_str());
+    } else {
+        if (_conn != nullptr)
+            _conn->setState(connEnum::ConnState::Connected);
+
+        printf("start tcp server character : %s %u %d %s\n",
+               server.listen_address().c_str(),
+               server.listen_port(),
+               asio2::last_error_val(),
+               asio2::last_error_msg().c_str());
+    }
 }
 
 void svr_listener::on_stop(asio2::tcp_server& server)
 {
+    _conn->setState(connEnum::ConnState::Disconnected);
     printf("stop tcp server character : %s %u %d %s\n",
            server.listen_address().c_str(), server.listen_port(),
            asio2::last_error_val(), asio2::last_error_msg().c_str());
+}
+
+
+void svr_listener::init(NetConn* conn) {
+    _conn = conn;
 }
 
 

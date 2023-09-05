@@ -1,11 +1,15 @@
 //
 // Created by wey on 2023/9/4.
 //
+#include "netConn.h"
 
 #include "netConnItem.h"
 namespace module {
 namespace net {
-void NetConnItem::init() {
+void NetConnItem::init(NetConn* conn) {
+    serverlistener.init(conn);
+    clientlistener.init(conn);
+
     server
         .bind_recv(&svr_listener::on_recv, serverlistener)    // by reference
         .bind_connect(&svr_listener::on_connect, &serverlistener)    // by pointer
@@ -27,9 +31,13 @@ void NetConnItem::setType(ConnType type) {
 }
 
 void NetConnItem::run(const std::string& address, const std::string& port) {
+    // 在开始启动前确保上一次连接全部关闭，因为有重连机制可能会连上
+    client.stop();
+    server.stop();
+
     if (_type == ConnType::TcpClient) {
         client.start(address, port);
-    }else{
+    } else {
         server.start(address, port);
     }
 }
@@ -43,7 +51,12 @@ void NetConnItem::stop() {
 }
 
 
-void NetConnItem::send() {
-
+void NetConnItem::send(const std::string& message) {
+    if (_type == ConnType::TcpClient) {
+        client.async_send(message);
+    } else {
+        server.async_send(message);
+    }
 }
-}}
+}    // namespace net
+}    // namespace module

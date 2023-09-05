@@ -7,3 +7,13 @@
 打开项目时会自动单独下载最新的vcpkg，无需提前配置
 
 开发环境：qt6.5
+
+
+
+
+
+
+
+`-DCMAKE_PREFIX_PATH=C:\Qt\6.5.2\msvc2019_64\lib\cmake -Wno-dev`
+
+`Path=C:\Qt\Tools\mingw1120_64\lib\;C:\Qt\Tools\mingw1120_64\bin\;C:\Qt\6.5.2\msvc2019_64\bin`

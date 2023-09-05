@@ -11,16 +11,18 @@
 namespace module {
 namespace net {
 
+class NetConn;
+
 class NetConnItem {
 public:
-    void init();
+    void init(NetConn* conn);
 
     void setType(ConnType type);
 
     void run(const std::string& address, const std::string& port);
 
     void stop();
-    void send();
+    void send(const std::string& message);
 
 private:
     asio2::tcp_server server;
