@@ -1,8 +1,9 @@
 {
-    "name": "netassistant",
-    "version-string": "0.0.1",
-    "dependencies": [
-      "fmt",
-      "boost-asio"
-    ]
+  "name": "netassistant",
+  "version-string": "0.0.1",
+  "dependencies": [
+    "fmt",
+    "boost-asio",
+    "boost-locale"
+  ]
 }

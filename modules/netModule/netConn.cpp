@@ -3,13 +3,14 @@
 
 #include "netConn.h"
 
+#include <boost/locale.hpp>
+
 namespace module {
 namespace net {
 NetConn::NetConn(QObject* parent)
     : QObject {parent}
     , _settings {}
-    , _countEnabled {true}
-    , _reconnectCancel {false} {
+    , _countEnabled {true} {
     // 需要在构造时手动注册类型
     qRegisterMetaType<ConnState>("ConnState");
     qRegisterMetaType<ConnType>("ConnType");
@@ -48,24 +49,32 @@ bool NetConn::receiveEnableState() const {
 }
 
 void NetConn::socketGroupSendMsg(const QString& message) {
-    item.send(message.toStdString());
+    // 编码转换应该在上层（也就是这一层）完成，底层只需要直接操作server和client，接收同理
+    // QString转到std::string的编码为utf8
+    auto utf8Str = message.toStdString();
+    // 进一步转到gbk的std::string
+    auto gbkStr = boost::locale::conv::between(utf8Str, "GBK", "UTF-8");
+    item.send(std::move(gbkStr));
+    addSendBytesCount(gbkStr.length());
 }
 
 void NetConn::showReceivedMsg(const std::string& message) {
-    QByteArray data = QByteArray::fromStdString(message);
-    QString qmessage = QString::fromLocal8Bit(data);
-    qDebug() << "recv: " << qmessage;
+    // 规定接收的只有gbk编码的std::string(或std::string_view)，需要转为unicode的QString
+    auto utf8Str = boost::locale::conv::between(message, "UTF-8", "GBK");
+    auto qMessage = QString::fromStdString(utf8Str);
+    auto data = message;
+    qDebug() << "recv: " << qMessage;
     // 根据不同设置格式化消息字符串
     if (_settings.timeStampEnabled) {
         int year, month, day;
         QDateTime::currentDateTime().date().getDate(&year, &month, &day);
         QString date = QString::number(year, 10) + "-" + QString::number(month, 10) + "-"
             + QString::number(day, 10);
-        qmessage = tr("[") + date + tr(" ") + QDateTime::currentDateTime().time().toString()
-            + tr("]") + qmessage;
+        qMessage = tr("[") + date + tr(" ") + QDateTime::currentDateTime().time().toString()
+            + tr("]") + qMessage;
     }
     // 发出消息改变的信号传到界面进行显示
-    emit messageChanged(qmessage);
+    emit messageChanged(qMessage);
     // 发出计数信号
     if (_countEnabled) {
         _recvBytesCount += data.length();
@@ -73,6 +82,10 @@ void NetConn::showReceivedMsg(const std::string& message) {
     }
 }
 
+void NetConn::addSendBytesCount(const uint64_t count){
+    _sendBytesCount+=count;
+    emit statisticsChanged(QString::number(_recvBytesCount), QString::number(_sendBytesCount));
+}
 
 void NetConn::init() {
     item.init(this);
@@ -176,7 +189,6 @@ void NetConn::setState(const ConnState state) {
         emit stateChanged(state);
     }
 }
-
 
 
 }    // namespace net

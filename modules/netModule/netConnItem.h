@@ -31,6 +31,7 @@ private:
     clt_listener clientlistener;
 
     ConnType _type;
+    NetConn* _conn;
 };
 }    // namespace net
 }    // namespace module

@@ -26,7 +26,7 @@ public:
     void init(NetConn* conn);
 
 private:
-    // 用于通知界面更新，实际上应该用消息总线之类的通知机制，但这里简单处理
+    // 用于调用界面更新，实际上应该用通知机制，起码弄个回调，但这里简单处理
     NetConn* _conn = nullptr;
 };
 

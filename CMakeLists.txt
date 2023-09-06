@@ -5,6 +5,9 @@ project(netassistant VERSION 0.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
+#add_compile_options("$<$<C_COMPILER_ID:MSVC>:/utf-8>")
+#add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
+
 find_package(Qt6 6.4 REQUIRED COMPONENTS Quick)
 
 
@@ -24,24 +27,15 @@ set(Boost_USE_STATIC_LIBS        ON)  # only find static libs
 #set(Boost_USE_DEBUG_LIBS        OFF)  # ignore debug libs and
 #set(Boost_USE_RELEASE_LIBS       ON)  # only find release libs
 set(Boost_USE_MULTITHREADED      ON)
-find_package(Boost COMPONENTS system REQUIRED) # system是asio依赖的组件
+find_package(Boost COMPONENTS REQUIRED system locale ) # system是asio依赖的组件
 if (Boost_FOUND)
   include_directories(${Boost_INCLUDE_DIRS})
   link_directories(${Boost_LIBRARY_DIRS})
 endif()
-# 导入asio2
-include_directories(include)
-
-# 避免file too big
-if(CMAKE_COMPILER_IS_GNUCXX)
-    #检查GNU是否支持-Wa,-mbig-obj
-    include(CheckCXXCompilerFlag)
-    check_cxx_compiler_flag("-Wa,-mbig-obj" GNU_BIG_OBJ_FLAG_ENABLE)
-    message(STATUS GNU_BIG_OBJ_FLAG_ENABLE=${GNU_BIG_OBJ_FLAG_ENABLE})
-endif()
-
 
 qt_standard_project_setup()
+
+add_subdirectory(modules/netModule)
 
 qt_add_executable(appnetassistant
     main.cpp
@@ -65,13 +59,6 @@ qt_add_qml_module(appnetassistant
     "qml/SettingsView/SettingsComponentContainer.qml"
     RESOURCES
     "qml/images/arrow-right.svg"
-    SOURCES modules/netModule/netConn.h
-    SOURCES modules/netModule/netConn.cpp
-    SOURCES modules/netModule/netConnItemSettings.h
-    SOURCES modules/netModule/tcpClientHandler.h
-    SOURCES modules/netModule/tcpClientHandler.cpp
-        SOURCES modules/netModule/netConnItem.h
-        SOURCES modules/netModule/netConnItem.cpp
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
@@ -85,30 +72,15 @@ set_target_properties(appnetassistant PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
 
-#target_compile_options(appnetassistant
-#        PRIVATE
-#        $<$<CXX_COMPILER_ID:MSVC>:/bigobj>
-#        $<$<AND:$<CXX_COMPILER_ID:GNU>,$<BOOL:${GNU_BIG_OBJ_FLAG_ENABLE}>>:-Wa,-mbig-obj>
-#)
-if(MSVC)
-    target_compile_options(appnetassistant PRIVATE /bigobj)
-elseif(CMAKE_COMPILER_IS_GNUCXX)
-    target_compile_options(appnetassistant PRIVATE -Wa,-mbig-obj)
-endif()
 
 
 target_link_libraries(appnetassistant
     PRIVATE Qt6::Quick
     fmt::fmt
     Boost::system
+    Boost::locale
+    netModule
 )
-
-if (WIN32)
-    target_link_libraries(appnetassistant
-            PRIVATE wsock32
-            ws2_32
-    )
-endif ()
 
 include(GNUInstallDirs)
 install(TARGETS appnetassistant

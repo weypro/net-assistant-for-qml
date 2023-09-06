@@ -7,6 +7,7 @@
 namespace module {
 namespace net {
 void NetConnItem::init(NetConn* conn) {
+    _conn=conn;
     serverlistener.init(conn);
     clientlistener.init(conn);
 

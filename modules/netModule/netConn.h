@@ -42,6 +42,8 @@ public:
     Q_INVOKABLE void socketGroupSendMsg(const QString& message);
     // socket接受消息显示
     Q_INVOKABLE void showReceivedMsg(const std::string& message);
+    // 增加发送字节数
+    Q_INVOKABLE void addSendBytesCount(const uint64_t count);
 
 public slots:
     // 初始化
@@ -87,13 +89,6 @@ signals:
     void reconnectSucceeded();
 
 private:
-    // tcp server，用组合的方式为每个连接item都提供了server和client的能力，方便直接使用
-    QSharedPointer<QTcpServer> _tcpServer;
-    // 用来管理已建立的socket
-    // 默认非server模式下，用且仅用列表里的第0个socket
-    QList<QSharedPointer<QTcpSocket>> _socketList;
-    std::mutex _socketListMutex;
-
     // 设置
     NetConnItemSettings _settings;
     // 连接状态
@@ -104,11 +99,6 @@ private:
     uint64_t _sendBytesCount;
     // 计数启用
     bool _countEnabled;
-
-    // 重连取消/完成信号，现在只有client一个socket需要重连，不需要线程池
-    std::future<void> _reconnectFinalResult;
-    std::atomic<bool> _reconnectCancel;
-
 
     NetConnItem item;
 };

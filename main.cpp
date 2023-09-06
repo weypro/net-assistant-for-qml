@@ -1,7 +1,7 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
-#include "modules/netModule/NetConn.h"
+#include "modules/netModule/netConn.h"
 
 int main(int argc, char *argv[])
 {

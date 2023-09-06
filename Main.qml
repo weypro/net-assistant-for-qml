@@ -135,7 +135,7 @@ ApplicationWindow {
                             ScrollBar.vertical.width: globalColor.scrollBarWidth
                             CustomTextArea {
                                 id: messageArea
-                                text: "Network test message"
+                                text: "Network test message你好"
                                 placeholderText: "Input the message"
                                 wrapMode: TextArea.WrapAnywhere
                             }
