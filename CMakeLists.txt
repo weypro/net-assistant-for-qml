@@ -11,6 +11,9 @@ set(CMAKE_AUTOMOC ON)
 find_package(Qt6 6.4 REQUIRED COMPONENTS Quick)
 
 
+set(Boost_USE_STATIC_LIBS        ON)
+set(Boost_USE_STATIC_RUNTIME OFF)
+
 # 自动下载并导入vcpkg
 cmake_policy(SET CMP0135 NEW)
 if(PROJECT_IS_TOP_LEVEL)
@@ -23,11 +26,12 @@ endif()
 # 导入fmt
 find_package(fmt CONFIG REQUIRED)
 # 导入boost
-set(Boost_USE_STATIC_LIBS        ON)  # only find static libs
+
 #set(Boost_USE_DEBUG_LIBS        OFF)  # ignore debug libs and
 #set(Boost_USE_RELEASE_LIBS       ON)  # only find release libs
-set(Boost_USE_MULTITHREADED      ON)
-find_package(Boost COMPONENTS REQUIRED system locale ) # system是asio依赖的组件
+#set(Boost_USE_MULTITHREADED      ON)
+find_package(Boost COMPONENTS system REQUIRED)
+find_package(Boost COMPONENTS locale REQUIRED)
 if (Boost_FOUND)
   include_directories(${Boost_INCLUDE_DIRS})
   link_directories(${Boost_LIBRARY_DIRS})
@@ -76,9 +80,9 @@ set_target_properties(appnetassistant PROPERTIES
 
 target_link_libraries(appnetassistant
     PRIVATE Qt6::Quick
-    fmt::fmt
-    Boost::system
-    Boost::locale
+#    fmt::fmt
+#    Boost::system
+#    Boost::locale
     netModule
 )
 

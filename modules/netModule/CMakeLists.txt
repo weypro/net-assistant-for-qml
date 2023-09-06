@@ -3,16 +3,6 @@ project(
         VERSION 0.1
         LANGUAGES CXX)
 
-# 导入fmt
-find_package(fmt CONFIG REQUIRED)
-# 导入boost
-set(Boost_USE_STATIC_LIBS        ON)
-set(Boost_USE_MULTITHREADED      ON)
-find_package(Boost COMPONENTS REQUIRED system locale ) # system是asio依赖的组件
-if (Boost_FOUND)
-    include_directories(${Boost_INCLUDE_DIRS})
-    link_directories(${Boost_LIBRARY_DIRS})
-endif()
 
 # 避免在windows用mingw下提示file too big
 # 注意qt的mingw默认是w32，但-mbig-obj标志位只对mingw-w64有效
