@@ -1,6 +1,3 @@
-//
-// Created by wey on 2023/9/4.
-//
 #include "netConn.h"
 
 #include "netConnItem.h"

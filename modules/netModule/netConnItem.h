@@ -1,7 +1,3 @@
-//
-// Created by wey on 2023/9/4.
-//
-
 #ifndef NETASSISTANT_NETCONNITEM_H
 #define NETASSISTANT_NETCONNITEM_H
 
