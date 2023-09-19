@@ -26,4 +26,4 @@ vcpkg默认会自动下载，无需配置，也可以自行修改cmake以手动�
 
 在debug/release configuration有设置environment variables系统变量的地方，需要自行修改path来模拟qtcreator的做法（见qtcreator项目配置项中的add build library search path to PATH）
 
-例如可以写`Path=C:\Qt\Tools\mingw1120_64\lib\;C:\Qt\Tools\mingw1120_64\bin\;C:\Qt\6.5.2\msvc2019_64\bin`
+例如可以写`Path=C:\Qt\Tools\mingw1120_64\lib\;C:\Qt\Tools\mingw1120_64\bin\;C:\Qt\6.5.2\msvc2019_64\bin;QT_ASSUME_STDERR_HAS_CONSOLE=1`
